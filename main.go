@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const prevFilePath = "watcher/prev.json"
@@ -19,7 +20,7 @@ type FileHashes map[string]string
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: watcher <directory_path>")
+		printHelpMenu()
 		os.Exit(1)
 	}
 	if os.Args[1] == "init" {
@@ -36,7 +37,7 @@ func main() {
 	} else if os.Args[1] == "clear" {
 		err := clearPrevJson()
 		if err != nil {
-			fmt.Printf("Error cleaning 'prev.json': %s\n", err)
+			fmt.Printf("Error clearing 'prev.json': %s\n", err)
 			os.Exit(1)
 		}
 		fmt.Println("'prev.json' cleared successfully!")
@@ -72,21 +73,28 @@ func main() {
 // computeHashes computes SHA-256 hashes for the files in the given directory.
 func computeHashes(dir string) FileHashes {
 	hashes := make(FileHashes)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		log.Fatalf("Error reading directory: %v", err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if strings.HasPrefix(path, "watcher") {
+			// skip `watcher` directory
+			return nil
 		}
-		path := filepath.Join(dir, entry.Name())
+		if err != nil {
+			log.Printf("Error accessing file %s: %v", path, err)
+			return nil
+		}
+		if info.IsDir() {
+			return nil
+		}
 		hash, err := hashFile(path)
 		if err != nil {
 			log.Printf("Error hashing file %s: %v", path, err)
-			continue
+			return nil
 		}
 		hashes[path] = hash
+		return nil
+	})
+	if err != nil {
+		log.Fatalf("Error walking directory: %v", err)
 	}
 	return hashes
 }
@@ -174,12 +182,12 @@ func initWatcher() error {
 func printHelpMenu() {
 	fmt.Println(
 		"Welcome to the file watcher help menu!\n\n" +
-		"Usage: watcher <directory_path> <opt_command>\n\n" +
-		"Valid commands:\n" +
-		"help  - Shows this menu.\n" + 
-		"init  - Generate the necessary directory structure for the tool.\n" +
-		"clear - Clears 'prev.json' in case it gets corrupted.\n" + 
-		"        Running the tool again will repopulate it.",
+			"Usage: watcher <directory_path> <opt_command>\n\n" +
+			"Valid commands:\n" +
+			"help  - Shows this menu.\n" +
+			"init  - Generate the necessary directory structure for the tool.\n" +
+			"clear - Clears 'prev.json' in case it gets corrupted.\n" +
+			"        Running the tool again will repopulate it.",
 	)
 }
 
