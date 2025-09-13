@@ -9,7 +9,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 const prevFilePath = "watcher/prev.json"
@@ -47,8 +46,8 @@ func main() {
 	prevHashes := loadPrevHashes()
 	currHashes := computeHashes(path)
 	latestChanges := make(FileHashes)
-	for file, _ := range currHashes {
-		if _, ok := prevHashes[file]; ok || len(prevHashes) == 0 {
+	for file := range currHashes {
+		if _, ok := prevHashes[file]; ok /*|| len(prevHashes) == 0*/ {
 			if prevHashes[file] != currHashes[file] {
 				latestChanges[file] = currHashes[file]
 			}
@@ -56,14 +55,19 @@ func main() {
 			latestChanges[file] = currHashes[file]
 		}
 	}
-	err := saveHashes(currHashes, latestChanges)
-	if err != nil {
+	for file := range prevHashes {
+		if _, stillThere := currHashes[file]; !stillThere {
+			latestChanges[file] = ""
+		}
+	}
+	ok := saveHashes(currHashes, latestChanges)
+	if !ok {
 		// No changes
 		writeTxtFile(latestChanges) // need to make sure the txt file is empty
-		fmt.Println(err)
+		fmt.Println("No changes detected. 'changed_files.txt' cleared.")
 	} else {
 		fmt.Println("Changed files:")
-		for file, _ := range latestChanges {
+		for file := range latestChanges {
 			fmt.Println(file)
 		}
 		fmt.Println("\nFiles written to 'watcher/changed_files.txt'.")
@@ -74,13 +78,13 @@ func main() {
 func computeHashes(dir string) FileHashes {
 	hashes := make(FileHashes)
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if strings.HasPrefix(path, "watcher") {
-			// skip `watcher` directory
-			return nil
-		}
 		if err != nil {
 			log.Printf("Error accessing file %s: %v", path, err)
 			return nil
+		}
+		if info.IsDir() && filepath.Base(path) == "watcher" {
+			// skips the 'watcher' directory
+			return filepath.SkipDir
 		}
 		if info.IsDir() {
 			return nil
@@ -106,7 +110,6 @@ func hashFile(filename string) (string, error) {
 		return "", fmt.Errorf("error opening file %s: %w", filename, err)
 	}
 	defer f.Close()
-
 	hasher := sha256.New()
 	if _, err := io.Copy(hasher, f); err != nil {
 		return "", fmt.Errorf("error hashing file %s: %w", filename, err)
@@ -129,10 +132,10 @@ func loadPrevHashes() FileHashes {
 	return hashes
 }
 
-func saveHashes(currHashes, changedHashes FileHashes) error {
+func saveHashes(currHashes, changedHashes FileHashes) bool {
 	if len(changedHashes) == 0 {
 		// Avoid resetting the JSON if no changes occurred.
-		return fmt.Errorf("No changes detected. 'changed_files.txt' cleared.")
+		return false
 	}
 	currData, err := json.MarshalIndent(currHashes, "", "  ")
 	if err != nil {
@@ -143,12 +146,12 @@ func saveHashes(currHashes, changedHashes FileHashes) error {
 		os.Exit(1)
 	}
 	writeTxtFile(changedHashes)
-	return nil
+	return true
 }
 
 func writeTxtFile(hashes FileHashes) {
 	contents := ""
-	for file, _ := range hashes {
+	for file := range hashes {
 		contents += file + "\n"
 	}
 	if err := os.WriteFile(changedFilesPath, []byte(contents), 0644); err != nil {
@@ -182,7 +185,7 @@ func initWatcher() error {
 func printHelpMenu() {
 	fmt.Println(
 		"Welcome to the file watcher help menu!\n\n" +
-			"Usage: watcher <directory_path> <opt_command>\n\n" +
+			"Usage: watcher <directory_path> OR <command>\n\n" +
 			"Valid commands:\n" +
 			"help  - Shows this menu.\n" +
 			"init  - Generate the necessary directory structure for the tool.\n" +
@@ -198,3 +201,4 @@ func clearPrevJson() error {
 	}
 	return nil
 }
+
